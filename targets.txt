@@ -1,0 +1,8 @@
+# Sample target list
+# One target per line
+192.168.1.1
+192.168.1.2
+192.168.1.3:2222
+10.0.0.1
+# This is a comment line
+127.0.0.1:22
