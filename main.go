@@ -20,11 +20,11 @@ func main() {
 	})
 	userArg := parser.String("u", "user", &argparse.Options{
 		Required: true,
-		Help:     "Username list (comma-separated). Example: 'admin,root,user'",
+		Help:     "Username list file (txt). One username per line. Example: 'admin' or 'root'",
 	})
 	passArg := parser.String("p", "pass", &argparse.Options{
 		Required: true,
-		Help:     "Password list (comma-separated). Example: 'password,123456,admin'",
+		Help:     "Password list file (txt). One password per line. Example: 'password' or '123456'",
 	})
 
 	// Optional arguments
@@ -58,12 +58,20 @@ func main() {
 		fmt.Printf("Error reading target file: %v\n", err)
 		os.Exit(1)
 	}
-	users := parseTargets(*userArg)
-	passwords := parseTargets(*passArg)
+	users, err := parseTargetFile(*userArg)
+	if err != nil {
+		fmt.Printf("Error reading username file: %v\n", err)
+		os.Exit(1)
+	}
+	passwords, err := parseTargetFile(*passArg)
+	if err != nil {
+		fmt.Printf("Error reading password file: %v\n", err)
+		os.Exit(1)
+	}
 
 	if len(targets) == 0 || len(users) == 0 || len(passwords) == 0 {
 		fmt.Println("Error: All lists must contain at least one item")
-		fmt.Println("   Make sure to use comma-separated values")
+		fmt.Println("   Make sure your files contain valid entries")
 		fmt.Println()
 		parser.Help(os.Stdout)
 		os.Exit(1)

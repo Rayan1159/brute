@@ -1,0 +1,11 @@
+# Common usernames
+admin
+root
+user
+administrator
+guest
+test
+demo
+ftp
+www
+mysql
