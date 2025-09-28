@@ -59,9 +59,10 @@ type WorkerPool struct {
 	detectionAvoidance DetectionAvoidance
 
 	// Advanced managers
-	stealthManager    *StealthManager
-	connectionManager *ConnectionManager
-	resourceManager   *ResourceManager
+	stealthManager        *StealthManager
+	connectionManager     *ConnectionManager
+	resourceManager       *ResourceManager
+	falsePositiveDetector *FalsePositiveDetector
 }
 
 // NewWorkerPool creates a new worker pool
@@ -606,7 +607,7 @@ func (wp *WorkerPool) SetHostDelay(delay time.Duration) {
 }
 
 // SetAdvancedConfigs sets the advanced optimization configurations
-func (wp *WorkerPool) SetAdvancedConfigs(evasion EvasionConfig, performance PerformanceConfig, detection DetectionAvoidance) {
+func (wp *WorkerPool) SetAdvancedConfigs(evasion EvasionConfig, performance PerformanceConfig, detection DetectionAvoidance, enableFalsePositiveDetection bool, validationTimeout int, confidenceThreshold float64, enableHoneypotDetection bool) {
 	wp.evasion = evasion
 	wp.performance = performance
 	wp.detectionAvoidance = detection
@@ -640,6 +641,25 @@ func (wp *WorkerPool) SetAdvancedConfigs(evasion EvasionConfig, performance Perf
 
 	// Set managers in connection manager
 	wp.connectionManager.SetManagers(wp.resourceManager, wp.stealthManager)
+
+	// Initialize false positive detector
+	if enableFalsePositiveDetection {
+		wp.falsePositiveDetector = NewFalsePositiveDetector()
+
+		// Configure the detector
+		config := FalsePositiveConfig{
+			EnableSessionValidation:    true,
+			EnableCommandExecution:     true,
+			EnableBannerAnalysis:       true,
+			EnableResponseVerification: true,
+			EnableHoneypotDetection:    enableHoneypotDetection,
+			MaxValidationTime:          time.Duration(validationTimeout) * time.Second,
+			CommandTimeout:             time.Duration(validationTimeout) * time.Second,
+			MinConfidenceThreshold:     confidenceThreshold,
+			MaxRetries:                 3,
+		}
+		wp.falsePositiveDetector.SetConfig(config)
+	}
 }
 
 // startHostRotationJobGenerator starts a goroutine that generates jobs with proper host rotation
@@ -836,4 +856,37 @@ func (wp *WorkerPool) printPerformanceReport() {
 	fmt.Printf("Human-like Retries: %t\n", wp.detectionAvoidance.HumanLikeRetries)
 	fmt.Printf("Fingerprint Randomization: %t\n", wp.evasion.FingerprintRandomization)
 	fmt.Printf("Session Simulation: %t\n", wp.evasion.SessionSimulation)
+
+	// False positive detection statistics
+	if wp.falsePositiveDetector != nil {
+		fmt.Printf("\n%s\n", wp.falsePositiveDetector.GetStatsReport())
+	}
+}
+
+// logFalsePositive logs a detected false positive
+func (wp *WorkerPool) logFalsePositive(job Job, reason string, confidence float64) {
+	fmt.Printf("🚨 FALSE POSITIVE DETECTED: %s@%s - %s (confidence: %.2f)\n",
+		job.Username, job.Target, reason, confidence)
+
+	// Log to file for analysis
+	wp.logToFile("false_positives.txt", fmt.Sprintf("%s %s@%s - %s (confidence: %.2f)\n",
+		time.Now().Format("2006-01-02 15:04:05"), job.Username, job.Target, reason, confidence))
+}
+
+// logSuccessfulValidation logs a successfully validated connection
+func (wp *WorkerPool) logSuccessfulValidation(job Job, reason string, confidence float64) {
+	fmt.Printf("✅ VALIDATION SUCCESSFUL: %s@%s - %s (confidence: %.2f)\n",
+		job.Username, job.Target, reason, confidence)
+}
+
+// logToFile logs a message to a file
+func (wp *WorkerPool) logToFile(filename, message string) {
+	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return // Silently fail
+	}
+	defer file.Close()
+
+	file.WriteString(message)
+	file.Sync()
 }

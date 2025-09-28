@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"math/rand"
 	"net"
 	"time"
@@ -57,6 +58,19 @@ func (wp *WorkerPool) trySSHLogin(job Job) (bool, error) {
 		return false, err
 	}
 	defer session.Close()
+
+	// CRITICAL: Validate the connection to prevent false positives
+	if wp.falsePositiveDetector != nil {
+		valid, confidence, reason := wp.falsePositiveDetector.ValidateConnection(sshClient, job.Target)
+		if !valid {
+			// This is a false positive - connection appeared successful but validation failed
+			wp.logFalsePositive(job, reason, confidence)
+			return false, fmt.Errorf("false positive detected: %s (confidence: %.2f)", reason, confidence)
+		}
+
+		// Log successful validation
+		wp.logSuccessfulValidation(job, reason, confidence)
+	}
 
 	// Update performance metrics
 	responseTime := time.Since(startTime)

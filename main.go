@@ -147,6 +147,25 @@ func main() {
 		Default:  false,
 	})
 
+	// False positive detection arguments
+	falsePositiveDetectionArg := parser.Flag("", "false-positive-detection", &argparse.Options{
+		Required: false,
+		Help:     "Enable comprehensive false positive detection and validation",
+		Default:  true,
+	})
+
+	validationTimeoutArg := parser.Int("", "validation-timeout", &argparse.Options{
+		Required: false,
+		Help:     "Timeout for validation commands in seconds (default: 10)",
+		Default:  10,
+	})
+
+	confidenceThresholdArg := parser.Float("", "confidence-threshold", &argparse.Options{
+		Required: false,
+		Help:     "Minimum confidence threshold for validation (default: 0.7)",
+		Default:  0.7,
+	})
+
 	// Parse arguments
 	err := parser.Parse(os.Args)
 	if err != nil {
@@ -247,6 +266,12 @@ func main() {
 	fmt.Printf("   Fast Ciphers: %t\n", *fastCiphersArg)
 	fmt.Printf("   Connection Pooling: %t\n", true)
 	fmt.Printf("   Pool Size: %d\n", *poolSizeArg)
+
+	// False positive detection settings
+	fmt.Printf("\n=== FALSE POSITIVE DETECTION ===\n")
+	fmt.Printf("   False Positive Detection: %t\n", *falsePositiveDetectionArg)
+	fmt.Printf("   Validation Timeout: %ds\n", *validationTimeoutArg)
+	fmt.Printf("   Confidence Threshold: %.2f\n", *confidenceThresholdArg)
 	fmt.Printf("\n")
 
 	// Create connection limits
@@ -307,7 +332,7 @@ func main() {
 	// Create worker pool with connection limits
 	pool := NewWorkerPool(*workerArg, limits)
 	pool.SetHostDelay(time.Duration(*hostDelayArg) * time.Second)
-	pool.SetAdvancedConfigs(evasion, performance, detectionAvoidance)
+	pool.SetAdvancedConfigs(evasion, performance, detectionAvoidance, *falsePositiveDetectionArg, *validationTimeoutArg, *confidenceThresholdArg, *honeypotArg)
 	defer pool.Close()
 
 	// Check for honeypots if enabled
