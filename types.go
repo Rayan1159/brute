@@ -41,4 +41,5 @@ type ConnectionLimits struct {
 	ConnectionTimeout time.Duration
 	ReadTimeout       time.Duration
 	RetryDelay        time.Duration
+	MaxRetries        int
 }

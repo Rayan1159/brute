@@ -66,6 +66,12 @@ func main() {
 		Default:  1000,
 	})
 
+	maxRetriesArg := parser.Int("", "max-retries", &argparse.Options{
+		Required: false,
+		Help:     "Maximum number of retries per target (default: 3)",
+		Default:  3,
+	})
+
 	// Parse arguments
 	err := parser.Parse(os.Args)
 	if err != nil {
@@ -151,6 +157,7 @@ func main() {
 	fmt.Printf("   Connection timeout: %ds\n", *connTimeoutArg)
 	fmt.Printf("   Read timeout: %ds\n", *readTimeoutArg)
 	fmt.Printf("   Retry delay: %dms\n", *retryDelayArg)
+	fmt.Printf("   Max retries per target: %d\n", *maxRetriesArg)
 	fmt.Printf("   Total combinations: %d\n\n", len(targets)*len(users)*len(passwords))
 
 	// Create connection limits
@@ -159,6 +166,7 @@ func main() {
 		ConnectionTimeout: time.Duration(*connTimeoutArg) * time.Second,
 		ReadTimeout:       time.Duration(*readTimeoutArg) * time.Second,
 		RetryDelay:        time.Duration(*retryDelayArg) * time.Millisecond,
+		MaxRetries:        *maxRetriesArg,
 	}
 
 	// Create worker pool with connection limits
