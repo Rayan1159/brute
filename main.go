@@ -86,9 +86,34 @@ func main() {
 	// Show configuration
 	fmt.Printf("🚀 SSH Brute Force Tool\n")
 	fmt.Printf("📊 Configuration:\n")
-	fmt.Printf("   Targets: %d (%s)\n", len(targets), strings.Join(targets, ", "))
-	fmt.Printf("   Users: %d (%s)\n", len(users), strings.Join(users, ", "))
-	fmt.Printf("   Passwords: %d (%s)\n", len(passwords), strings.Join(passwords, ", "))
+
+	// Show limited target list (max 5 targets)
+	targetDisplay := targets
+	if len(targets) > 5 {
+		targetDisplay = targets[:5]
+		fmt.Printf("   Targets: %d (%s... and %d more)\n", len(targets), strings.Join(targetDisplay, ", "), len(targets)-5)
+	} else {
+		fmt.Printf("   Targets: %d (%s)\n", len(targets), strings.Join(targetDisplay, ", "))
+	}
+
+	// Show limited user list (max 3 users)
+	userDisplay := users
+	if len(users) > 3 {
+		userDisplay = users[:3]
+		fmt.Printf("   Users: %d (%s... and %d more)\n", len(users), strings.Join(userDisplay, ", "), len(users)-3)
+	} else {
+		fmt.Printf("   Users: %d (%s)\n", len(users), strings.Join(userDisplay, ", "))
+	}
+
+	// Show limited password list (max 3 passwords)
+	passDisplay := passwords
+	if len(passwords) > 3 {
+		passDisplay = passwords[:3]
+		fmt.Printf("   Passwords: %d (%s... and %d more)\n", len(passwords), strings.Join(passDisplay, ", "), len(passwords)-3)
+	} else {
+		fmt.Printf("   Passwords: %d (%s)\n", len(passwords), strings.Join(passDisplay, ", "))
+	}
+
 	fmt.Printf("   Workers: %d\n", *workerArg)
 	fmt.Printf("   Total combinations: %d\n\n", len(targets)*len(users)*len(passwords))
 
