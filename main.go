@@ -109,6 +109,44 @@ func main() {
 		Default:  false,
 	})
 
+	// Advanced stealth arguments
+	trafficObfuscationArg := parser.Flag("", "traffic-obfuscation", &argparse.Options{
+		Required: false,
+		Help:     "Enable traffic obfuscation techniques",
+		Default:  false,
+	})
+
+	adaptiveDelaysArg := parser.Flag("", "adaptive-delays", &argparse.Options{
+		Required: false,
+		Help:     "Enable adaptive delay adjustment based on success rate",
+		Default:  false,
+	})
+
+	fingerprintRandomizationArg := parser.Flag("", "fingerprint-randomization", &argparse.Options{
+		Required: false,
+		Help:     "Randomize SSH client fingerprints",
+		Default:  false,
+	})
+
+	sessionSimulationArg := parser.Flag("", "session-simulation", &argparse.Options{
+		Required: false,
+		Help:     "Simulate realistic SSH sessions",
+		Default:  false,
+	})
+
+	// Performance monitoring arguments
+	performanceMonitoringArg := parser.Flag("", "performance-monitoring", &argparse.Options{
+		Required: false,
+		Help:     "Enable detailed performance monitoring and reporting",
+		Default:  false,
+	})
+
+	resourceOptimizationArg := parser.Flag("", "resource-optimization", &argparse.Options{
+		Required: false,
+		Help:     "Enable automatic resource optimization",
+		Default:  false,
+	})
+
 	// Parse arguments
 	err := parser.Parse(os.Args)
 	if err != nil {
@@ -196,7 +234,20 @@ func main() {
 	fmt.Printf("   Retry delay: %dms\n", *retryDelayArg)
 	fmt.Printf("   Max retries per target: %d\n", *maxRetriesArg)
 	fmt.Printf("   Host delay: %ds\n", *hostDelayArg)
-	fmt.Printf("   Total combinations: %d\n\n", len(targets)*len(users)*len(passwords))
+	fmt.Printf("   Total combinations: %d\n", len(targets)*len(users)*len(passwords))
+	fmt.Printf("   Stealth Mode: %t\n", *stealthArg)
+	fmt.Printf("   Behavioral Mimicking: %t\n", *behavioralArg)
+	fmt.Printf("   Traffic Obfuscation: %t\n", *trafficObfuscationArg)
+	fmt.Printf("   Adaptive Delays: %t\n", *adaptiveDelaysArg)
+	fmt.Printf("   Fingerprint Randomization: %t\n", *fingerprintRandomizationArg)
+	fmt.Printf("   Session Simulation: %t\n", *sessionSimulationArg)
+	fmt.Printf("   Performance Monitoring: %t\n", *performanceMonitoringArg)
+	fmt.Printf("   Resource Optimization: %t\n", *resourceOptimizationArg)
+	fmt.Printf("   Compression: %t\n", *compressionArg)
+	fmt.Printf("   Fast Ciphers: %t\n", *fastCiphersArg)
+	fmt.Printf("   Connection Pooling: %t\n", true)
+	fmt.Printf("   Pool Size: %d\n", *poolSizeArg)
+	fmt.Printf("\n")
 
 	// Create connection limits
 	limits := ConnectionLimits{
@@ -215,6 +266,21 @@ func main() {
 		MaxDelay:                  time.Duration(500) * time.Millisecond, // 0.5s
 		UserAgentRotation:         *stealthArg,
 		RealisticRetryPatterns:    *behavioralArg,
+		// Advanced stealth features
+		TrafficObfuscation:       *trafficObfuscationArg,
+		HumanLikeTiming:          *stealthArg,
+		AdaptiveDelays:           *adaptiveDelaysArg,
+		FingerprintRandomization: *fingerprintRandomizationArg,
+		SessionSimulation:        *sessionSimulationArg,
+		// Behavioral patterns
+		TypingPatterns:          *behavioralArg,
+		MouseMovementSimulation: *behavioralArg,
+		RealisticErrorHandling:  *behavioralArg,
+		// Network-level evasion
+		ProxyRotation:       false, // Not implemented yet
+		IPRotation:          false, // Not implemented yet
+		TrafficShaping:      *trafficObfuscationArg,
+		PacketFragmentation: false, // Not implemented yet
 	}
 
 	// Create performance configuration
@@ -230,7 +296,7 @@ func main() {
 
 	// Create detection avoidance configuration
 	detectionAvoidance := DetectionAvoidance{
-		EnableTrafficObfuscation: *stealthArg,
+		EnableTrafficObfuscation: *trafficObfuscationArg,
 		VaryTimingPatterns:       *stealthArg,
 		RealisticUserAgents:      *stealthArg,
 		HumanLikeRetries:         *behavioralArg,
