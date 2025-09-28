@@ -2,42 +2,10 @@ package main
 
 import (
 	"net"
-	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 )
-
-// getSSHBanners retrieves SSH banners from multiple targets
-func getSSHBanners(targets []string) []string {
-	banners := make([]string, 0, len(targets))
-	for _, target := range targets {
-		addr := target
-		port := "22"
-		if strings.Contains(target, ":") {
-			parts := strings.Split(target, ":")
-			addr = parts[0]
-			port = parts[1]
-		}
-		conn, err := net.DialTimeout("tcp", addr+":"+port, 5*time.Second)
-		if err != nil {
-			banners = append(banners, "error: "+err.Error())
-			continue
-		}
-		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-		buf := make([]byte, 256)
-		n, err := conn.Read(buf)
-		if err != nil {
-			banners = append(banners, "error: "+err.Error())
-			conn.Close()
-			continue
-		}
-		banner := strings.TrimSpace(string(buf[:n]))
-		banners = append(banners, banner)
-		conn.Close()
-	}
-	return banners
-}
 
 // trySSHLogin attempts SSH login with proper resource management
 func (wp *WorkerPool) trySSHLogin(job Job) (bool, error) {

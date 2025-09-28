@@ -92,13 +92,6 @@ func main() {
 	fmt.Printf("   Workers: %d\n", *workerArg)
 	fmt.Printf("   Total combinations: %d\n\n", len(targets)*len(users)*len(passwords))
 
-	// Get SSH banners first
-	fmt.Println("🔍 Getting SSH banners...")
-	banners := getSSHBanners(targets)
-	for i, target := range targets {
-		fmt.Printf("   %s: %s\n", target, banners[i])
-	}
-
 	// Create worker pool with honeypot detection
 	pool := NewWorkerPool(*workerArg)
 	defer pool.Close()
