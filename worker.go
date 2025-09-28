@@ -114,8 +114,8 @@ func (wp *WorkerPool) BruteForceSSH(targets, users, passwords []string) {
 	// Start result collector
 	go wp.collectResults()
 
-	// Start interval honeypot checker
-	go wp.intervalHoneypotChecker()
+	// Start interval honeypot checker (only if honeypot detection is enabled)
+	// This will be controlled by the main function
 
 	// Generate and queue jobs
 	totalJobs := 0
@@ -171,9 +171,13 @@ func (wp *WorkerPool) collectResults() {
 		}
 		wp.mu.Unlock()
 
+		// Log every host attempt
+		fmt.Printf("Attempting: %s@%s with password '%s'\n",
+			result.Job.Username, result.Job.Target, result.Job.Password)
+
 		// Print success immediately (these are important)
 		if result.Success {
-			fmt.Printf("\n🎉 SUCCESS: %s:%s@%s\n", result.Job.Username, result.Job.Password, result.Job.Target)
+			fmt.Printf("SUCCESS: %s:%s@%s\n", result.Job.Username, result.Job.Password, result.Job.Target)
 		}
 	}
 }
@@ -299,8 +303,13 @@ func (wp *WorkerPool) quickHoneypotCheck() {
 		// Quick check with shorter timeout
 		info := wp.detector.AnalyzeTarget(target)
 		if info.IsHoneypot {
-			fmt.Printf("\n⚠️  HONEYPOT DETECTED DURING BRUTE FORCE: %s (confidence: %.1f%%)\n",
+			fmt.Printf("\nHONEYPOT DETECTED DURING BRUTE FORCE: %s (confidence: %.1f%%)\n",
 				target, info.Confidence*100)
 		}
 	}
+}
+
+// EnableIntervalHoneypotChecking enables interval-based honeypot checking
+func (wp *WorkerPool) EnableIntervalHoneypotChecking() {
+	go wp.intervalHoneypotChecker()
 }

@@ -34,6 +34,12 @@ func main() {
 		Default:  runtime.NumCPU() * 2,
 	})
 
+	honeypotArg := parser.Flag("", "honeypot", &argparse.Options{
+		Required: false,
+		Help:     "Enable honeypot detection and checking",
+		Default:  false,
+	})
+
 	// Parse arguments
 	err := parser.Parse(os.Args)
 	if err != nil {
@@ -84,8 +90,8 @@ func main() {
 	}
 
 	// Show configuration
-	fmt.Printf("🚀 SSH Brute Force Tool\n")
-	fmt.Printf("📊 Configuration:\n")
+	fmt.Printf("SSH Brute Force Tool\n")
+	fmt.Printf("Configuration:\n")
 
 	// Show limited target list (max 5 targets)
 	targetDisplay := targets
@@ -121,19 +127,31 @@ func main() {
 	pool := NewWorkerPool(*workerArg)
 	defer pool.Close()
 
-	// Check for honeypots first
-	fmt.Println("\n🍯 Checking for honeypots...")
-	honeypotTargets := pool.CheckHoneypots(targets)
+	// Check for honeypots if enabled
+	if *honeypotArg {
+		fmt.Println("\nChecking for honeypots...")
+		honeypotTargets := pool.CheckHoneypots(targets)
 
-	if len(honeypotTargets) > 0 {
-		fmt.Println("⚠️  HONEYPOT DETECTED - Skipping the following targets:")
-		for target, info := range honeypotTargets {
-			fmt.Printf("   %s (confidence: %.1f%%) - %s\n", target, info.Confidence*100, strings.Join(info.Reasons, ", "))
+		if len(honeypotTargets) > 0 {
+			fmt.Println("HONEYPOT DETECTED - Skipping the following targets:")
+			for target, info := range honeypotTargets {
+				fmt.Printf("   %s (confidence: %.1f%%) - %s\n", target, info.Confidence*100, strings.Join(info.Reasons, ", "))
+			}
+			fmt.Println()
+		} else {
+			fmt.Println("No honeypots detected")
 		}
-		fmt.Println()
+	} else {
+		fmt.Println("\nHoneypot detection disabled - use --honeypot flag to enable")
 	}
 
 	// Start brute force with worker pool
-	fmt.Printf("⚡ Starting brute force with %d workers...\n", *workerArg)
+	fmt.Printf("Starting brute force with %d workers...\n", *workerArg)
+
+	// Enable interval honeypot checking if honeypot detection is enabled
+	if *honeypotArg {
+		pool.EnableIntervalHoneypotChecking()
+	}
+
 	pool.BruteForceSSH(targets, users, passwords)
 }
