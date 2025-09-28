@@ -72,6 +72,12 @@ func main() {
 		Default:  3,
 	})
 
+	hostDelayArg := parser.Int("", "host-delay", &argparse.Options{
+		Required: false,
+		Help:     "Delay between attempts to same host in seconds (default: 2)",
+		Default:  2,
+	})
+
 	// Parse arguments
 	err := parser.Parse(os.Args)
 	if err != nil {
@@ -158,6 +164,7 @@ func main() {
 	fmt.Printf("   Read timeout: %ds\n", *readTimeoutArg)
 	fmt.Printf("   Retry delay: %dms\n", *retryDelayArg)
 	fmt.Printf("   Max retries per target: %d\n", *maxRetriesArg)
+	fmt.Printf("   Host delay: %ds\n", *hostDelayArg)
 	fmt.Printf("   Total combinations: %d\n\n", len(targets)*len(users)*len(passwords))
 
 	// Create connection limits
@@ -171,6 +178,7 @@ func main() {
 
 	// Create worker pool with connection limits
 	pool := NewWorkerPool(*workerArg, limits)
+	pool.SetHostDelay(time.Duration(*hostDelayArg) * time.Second)
 	defer pool.Close()
 
 	// Check for honeypots if enabled

