@@ -15,15 +15,18 @@ func (wp *WorkerPool) trySSHLogin(job Job) (bool, error) {
 			ssh.Password(job.Password),
 		},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         5 * time.Second,
+		Timeout:         wp.limits.ConnectionTimeout,
 	}
 
-	// Create connection with timeout
-	conn, err := net.DialTimeout("tcp", job.Target, 5*time.Second)
+	// Create connection with configurable timeout
+	conn, err := net.DialTimeout("tcp", job.Target, wp.limits.ConnectionTimeout)
 	if err != nil {
 		return false, err
 	}
 	defer conn.Close()
+
+	// Set read timeout
+	conn.SetReadDeadline(time.Now().Add(wp.limits.ReadTimeout))
 
 	// Create SSH client
 	client, chans, reqs, err := ssh.NewClientConn(conn, job.Target, config)

@@ -26,3 +26,19 @@ type HoneypotInfo struct {
 	Banner       string
 	ResponseTime time.Duration
 }
+
+// FailedIPInfo contains information about failed IPs
+type FailedIPInfo struct {
+	IP        string
+	FailCount int
+	LastFail  time.Time
+	Reasons   []string
+}
+
+// ConnectionLimits contains connection limiting configuration
+type ConnectionLimits struct {
+	MaxConnsPerTarget int
+	ConnectionTimeout time.Duration
+	ReadTimeout       time.Duration
+	RetryDelay        time.Duration
+}

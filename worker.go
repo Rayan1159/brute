@@ -31,10 +31,17 @@ type WorkerPool struct {
 	monitoredTargets      []string
 	honeypotCheckInterval time.Duration
 	lastHoneypotCheck     time.Time
+
+	// Connection limiting and failed IP caching
+	limits         ConnectionLimits
+	failedIPs      map[string]*FailedIPInfo
+	failedIPsMutex sync.RWMutex
+	connSemaphores map[string]chan struct{} // Per-target connection limiters
+	connSemMutex   sync.Mutex
 }
 
 // NewWorkerPool creates a new worker pool
-func NewWorkerPool(workers int) *WorkerPool {
+func NewWorkerPool(workers int, limits ConnectionLimits) *WorkerPool {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &WorkerPool{
@@ -48,6 +55,9 @@ func NewWorkerPool(workers int) *WorkerPool {
 		startTime:             time.Now(),
 		honeypotCheckInterval: 30 * time.Second, // Check every 30 seconds
 		lastHoneypotCheck:     time.Now(),
+		limits:                limits,
+		failedIPs:             make(map[string]*FailedIPInfo),
+		connSemaphores:        make(map[string]chan struct{}),
 	}
 }
 
@@ -82,8 +92,49 @@ func (wp *WorkerPool) worker(id int) {
 				return // Channel closed
 			}
 
+			// Check if IP has failed too many times
+			if wp.isIPFailed(job.Target) {
+				// Skip this job, record as failed
+				result := Result{
+					Job:     job,
+					Success: false,
+					Error:   fmt.Errorf("IP %s has failed too many times", job.Target),
+				}
+				select {
+				case wp.resultChan <- result:
+				case <-wp.ctx.Done():
+					return
+				}
+				continue
+			}
+
+			// Try to acquire connection slot
+			if !wp.acquireConnection(job.Target) {
+				// No available connection slots, skip this job
+				result := Result{
+					Job:     job,
+					Success: false,
+					Error:   fmt.Errorf("no available connection slots for %s", job.Target),
+				}
+				select {
+				case wp.resultChan <- result:
+				case <-wp.ctx.Done():
+					return
+				}
+				continue
+			}
+
 			// Process the job
 			success, err := wp.trySSHLogin(job)
+
+			// Release connection slot
+			wp.releaseConnection(job.Target)
+
+			// Record failed attempts
+			if !success && err != nil {
+				wp.recordFailedIP(job.Target, err.Error())
+			}
+
 			result := Result{
 				Job:     job,
 				Success: success,
@@ -225,6 +276,25 @@ func (wp *WorkerPool) printResults() {
 	fmt.Printf("Failed attempts: %d\n", wp.completedJobs-wp.successCount)
 	fmt.Printf("Time elapsed: %v\n", elapsed.Round(time.Second))
 	fmt.Printf("Average rate: %.1f attempts/second\n", rate)
+
+	// Print failed IPs statistics
+	wp.printFailedIPsStats()
+}
+
+// printFailedIPsStats prints statistics about failed IPs
+func (wp *WorkerPool) printFailedIPsStats() {
+	wp.failedIPsMutex.RLock()
+	defer wp.failedIPsMutex.RUnlock()
+
+	if len(wp.failedIPs) == 0 {
+		return
+	}
+
+	fmt.Printf("\n=== FAILED IPs STATISTICS ===\n")
+	for ip, info := range wp.failedIPs {
+		fmt.Printf("IP: %s | Failures: %d | Last Fail: %v\n",
+			ip, info.FailCount, info.LastFail.Format("15:04:05"))
+	}
 }
 
 // CheckHoneypots analyzes targets for honeypot characteristics with concurrent processing
@@ -312,4 +382,76 @@ func (wp *WorkerPool) quickHoneypotCheck() {
 // EnableIntervalHoneypotChecking enables interval-based honeypot checking
 func (wp *WorkerPool) EnableIntervalHoneypotChecking() {
 	go wp.intervalHoneypotChecker()
+}
+
+// isIPFailed checks if an IP has failed too many times
+func (wp *WorkerPool) isIPFailed(target string) bool {
+	wp.failedIPsMutex.RLock()
+	defer wp.failedIPsMutex.RUnlock()
+
+	info, exists := wp.failedIPs[target]
+	if !exists {
+		return false
+	}
+
+	// Check if IP has failed too many times (configurable threshold)
+	return info.FailCount >= 5
+}
+
+// recordFailedIP records a failed attempt for an IP
+func (wp *WorkerPool) recordFailedIP(target string, reason string) {
+	wp.failedIPsMutex.Lock()
+	defer wp.failedIPsMutex.Unlock()
+
+	info, exists := wp.failedIPs[target]
+	if !exists {
+		info = &FailedIPInfo{
+			IP:        target,
+			FailCount: 0,
+			Reasons:   make([]string, 0),
+		}
+		wp.failedIPs[target] = info
+	}
+
+	info.FailCount++
+	info.LastFail = time.Now()
+	info.Reasons = append(info.Reasons, reason)
+}
+
+// getConnectionSemaphore gets or creates a semaphore for a target
+func (wp *WorkerPool) getConnectionSemaphore(target string) chan struct{} {
+	wp.connSemMutex.Lock()
+	defer wp.connSemMutex.Unlock()
+
+	sem, exists := wp.connSemaphores[target]
+	if !exists {
+		sem = make(chan struct{}, wp.limits.MaxConnsPerTarget)
+		wp.connSemaphores[target] = sem
+	}
+
+	return sem
+}
+
+// acquireConnection acquires a connection slot for a target
+func (wp *WorkerPool) acquireConnection(target string) bool {
+	sem := wp.getConnectionSemaphore(target)
+
+	select {
+	case sem <- struct{}{}:
+		return true
+	case <-wp.ctx.Done():
+		return false
+	default:
+		return false // No available connection slots
+	}
+}
+
+// releaseConnection releases a connection slot for a target
+func (wp *WorkerPool) releaseConnection(target string) {
+	sem := wp.getConnectionSemaphore(target)
+	select {
+	case <-sem:
+	default:
+		// Semaphore was already empty, shouldn't happen
+	}
 }

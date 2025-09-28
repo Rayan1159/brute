@@ -5,6 +5,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/akamensky/argparse"
 )
@@ -38,6 +39,31 @@ func main() {
 		Required: false,
 		Help:     "Enable honeypot detection and checking",
 		Default:  false,
+	})
+
+	// Connection limiting arguments
+	maxConnsArg := parser.Int("", "max-conns", &argparse.Options{
+		Required: false,
+		Help:     "Maximum concurrent connections per target (default: 3)",
+		Default:  3,
+	})
+
+	connTimeoutArg := parser.Int("", "conn-timeout", &argparse.Options{
+		Required: false,
+		Help:     "Connection timeout in seconds (default: 5)",
+		Default:  5,
+	})
+
+	readTimeoutArg := parser.Int("", "read-timeout", &argparse.Options{
+		Required: false,
+		Help:     "Read timeout in seconds (default: 3)",
+		Default:  3,
+	})
+
+	retryDelayArg := parser.Int("", "retry-delay", &argparse.Options{
+		Required: false,
+		Help:     "Delay between retries in milliseconds (default: 1000)",
+		Default:  1000,
 	})
 
 	// Parse arguments
@@ -121,10 +147,22 @@ func main() {
 	}
 
 	fmt.Printf("   Workers: %d\n", *workerArg)
+	fmt.Printf("   Max connections per target: %d\n", *maxConnsArg)
+	fmt.Printf("   Connection timeout: %ds\n", *connTimeoutArg)
+	fmt.Printf("   Read timeout: %ds\n", *readTimeoutArg)
+	fmt.Printf("   Retry delay: %dms\n", *retryDelayArg)
 	fmt.Printf("   Total combinations: %d\n\n", len(targets)*len(users)*len(passwords))
 
-	// Create worker pool with honeypot detection
-	pool := NewWorkerPool(*workerArg)
+	// Create connection limits
+	limits := ConnectionLimits{
+		MaxConnsPerTarget: *maxConnsArg,
+		ConnectionTimeout: time.Duration(*connTimeoutArg) * time.Second,
+		ReadTimeout:       time.Duration(*readTimeoutArg) * time.Second,
+		RetryDelay:        time.Duration(*retryDelayArg) * time.Millisecond,
+	}
+
+	// Create worker pool with connection limits
+	pool := NewWorkerPool(*workerArg, limits)
 	defer pool.Close()
 
 	// Check for honeypots if enabled
