@@ -78,6 +78,37 @@ func main() {
 		Default:  2,
 	})
 
+	// Advanced optimization arguments
+	stealthArg := parser.Flag("", "stealth", &argparse.Options{
+		Required: false,
+		Help:     "Enable stealth mode with behavioral mimicking and timing randomization",
+		Default:  false,
+	})
+
+	compressionArg := parser.Flag("", "compression", &argparse.Options{
+		Required: false,
+		Help:     "Enable SSH compression for better performance",
+		Default:  false,
+	})
+
+	fastCiphersArg := parser.Flag("", "fast-ciphers", &argparse.Options{
+		Required: false,
+		Help:     "Use faster cipher algorithms (aes128-ctr)",
+		Default:  false,
+	})
+
+	poolSizeArg := parser.Int("", "pool-size", &argparse.Options{
+		Required: false,
+		Help:     "Connection pool size for connection reuse (default: 50)",
+		Default:  50,
+	})
+
+	behavioralArg := parser.Flag("", "behavioral", &argparse.Options{
+		Required: false,
+		Help:     "Enable behavioral mimicking to avoid detection",
+		Default:  false,
+	})
+
 	// Parse arguments
 	err := parser.Parse(os.Args)
 	if err != nil {
@@ -176,9 +207,41 @@ func main() {
 		MaxRetries:        *maxRetriesArg,
 	}
 
+	// Create evasion configuration
+	evasion := EvasionConfig{
+		EnableBehavioralMimicking: *behavioralArg,
+		RandomizeTiming:           *stealthArg,
+		MinDelay:                  time.Duration(300) * time.Millisecond, // 0.3s
+		MaxDelay:                  time.Duration(500) * time.Millisecond, // 0.5s
+		UserAgentRotation:         *stealthArg,
+		RealisticRetryPatterns:    *behavioralArg,
+	}
+
+	// Create performance configuration
+	performance := PerformanceConfig{
+		EnableCompression:   *compressionArg,
+		FastCiphers:         *fastCiphersArg,
+		ConnectionPooling:   true,
+		MaxPoolSize:         *poolSizeArg,
+		KeepAliveInterval:   time.Duration(30) * time.Second,
+		BufferSize:          8192,
+		EnableLoadBalancing: *stealthArg,
+	}
+
+	// Create detection avoidance configuration
+	detectionAvoidance := DetectionAvoidance{
+		EnableTrafficObfuscation: *stealthArg,
+		VaryTimingPatterns:       *stealthArg,
+		RealisticUserAgents:      *stealthArg,
+		HumanLikeRetries:         *behavioralArg,
+		DistributedMode:          false, // Single source for now
+		MaxAttemptsPerSource:     5,
+	}
+
 	// Create worker pool with connection limits
 	pool := NewWorkerPool(*workerArg, limits)
 	pool.SetHostDelay(time.Duration(*hostDelayArg) * time.Second)
+	pool.SetAdvancedConfigs(evasion, performance, detectionAvoidance)
 	defer pool.Close()
 
 	// Check for honeypots if enabled

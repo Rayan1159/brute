@@ -43,3 +43,34 @@ type ConnectionLimits struct {
 	RetryDelay        time.Duration
 	MaxRetries        int
 }
+
+// EvasionConfig contains stealth and evasion settings
+type EvasionConfig struct {
+	EnableBehavioralMimicking bool
+	RandomizeTiming           bool
+	MinDelay                  time.Duration
+	MaxDelay                  time.Duration
+	UserAgentRotation         bool
+	RealisticRetryPatterns    bool
+}
+
+// PerformanceConfig contains performance optimization settings
+type PerformanceConfig struct {
+	EnableCompression   bool
+	FastCiphers         bool
+	ConnectionPooling   bool
+	MaxPoolSize         int
+	KeepAliveInterval   time.Duration
+	BufferSize          int
+	EnableLoadBalancing bool
+}
+
+// DetectionAvoidance contains anti-detection settings
+type DetectionAvoidance struct {
+	EnableTrafficObfuscation bool
+	VaryTimingPatterns       bool
+	RealisticUserAgents      bool
+	HumanLikeRetries         bool
+	DistributedMode          bool
+	MaxAttemptsPerSource     int
+}

@@ -51,6 +51,11 @@ type WorkerPool struct {
 	hostDelay        time.Duration
 	hostMutex        sync.RWMutex
 	jobGeneratorDone chan struct{}
+
+	// Advanced optimization configurations
+	evasion            EvasionConfig
+	performance        PerformanceConfig
+	detectionAvoidance DetectionAvoidance
 }
 
 // NewWorkerPool creates a new worker pool
@@ -583,6 +588,13 @@ func (wp *WorkerPool) SetHostDelay(delay time.Duration) {
 	wp.hostMutex.Lock()
 	wp.hostDelay = delay
 	wp.hostMutex.Unlock()
+}
+
+// SetAdvancedConfigs sets the advanced optimization configurations
+func (wp *WorkerPool) SetAdvancedConfigs(evasion EvasionConfig, performance PerformanceConfig, detection DetectionAvoidance) {
+	wp.evasion = evasion
+	wp.performance = performance
+	wp.detectionAvoidance = detection
 }
 
 // startHostRotationJobGenerator starts a goroutine that generates jobs with proper host rotation
