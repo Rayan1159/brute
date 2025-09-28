@@ -47,9 +47,10 @@ type WorkerPool struct {
 	passwordMutex    sync.RWMutex
 
 	// Host rotation tracking
-	lastHostAttempt map[string]time.Time
-	hostDelay       time.Duration
-	hostMutex       sync.RWMutex
+	lastHostAttempt  map[string]time.Time
+	hostDelay        time.Duration
+	hostMutex        sync.RWMutex
+	jobGeneratorDone chan struct{}
 }
 
 // NewWorkerPool creates a new worker pool
@@ -72,11 +73,15 @@ func NewWorkerPool(workers int, limits ConnectionLimits) *WorkerPool {
 		connSemaphores:        make(map[string]chan struct{}),
 		lastHostAttempt:       make(map[string]time.Time),
 		hostDelay:             2 * time.Second, // 2 second delay between attempts to same host
+		jobGeneratorDone:      make(chan struct{}),
 	}
 }
 
 // Close shuts down the worker pool and triggers garbage collection
 func (wp *WorkerPool) Close() {
+	// Wait for job generator to finish
+	<-wp.jobGeneratorDone
+
 	close(wp.jobQueue)
 	wp.cancel()
 	wp.wg.Wait()
@@ -583,7 +588,7 @@ func (wp *WorkerPool) SetHostDelay(delay time.Duration) {
 // startHostRotationJobGenerator starts a goroutine that generates jobs with proper host rotation
 func (wp *WorkerPool) startHostRotationJobGenerator(targets, users, passwords []string) {
 	go func() {
-		defer close(wp.jobQueue)
+		// Don't close the channel here - let the Close() method handle it
 
 		// Create a round-robin system for true host rotation
 		hostIndex := 0
@@ -667,5 +672,8 @@ func (wp *WorkerPool) startHostRotationJobGenerator(targets, users, passwords []
 				time.Sleep(100 * time.Millisecond)
 			}
 		}
+
+		// Signal that job generation is complete
+		close(wp.jobGeneratorDone)
 	}()
 }
